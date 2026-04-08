@@ -1,0 +1,15 @@
+{
+  "name": "omi-card-game",
+  "version": "1.0.0",
+  "description": "Real-time multiplayer Omi card game",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "ws": "^8.16.0",
+    "uuid": "^9.0.0"
+  }
+}
