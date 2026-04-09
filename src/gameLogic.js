@@ -25,86 +25,6 @@ function shuffle(array) {
   return a;
 }
 
-function cutDeck(deck, partsCount) {
-  const n = deck.length;
-  const parts = Math.max(2, Math.min(3, partsCount || 2));
-  if (n < 3) return { deck: [...deck], partsCount: 1, cutPoints: [] };
-
-  if (parts === 2) {
-    const cut1 = 1 + Math.floor(Math.random() * (n - 1));
-    const p0 = deck.slice(0, cut1);
-    const p1 = deck.slice(cut1);
-    return { deck: [...p1, ...p0], partsCount: 2, cutPoints: [cut1] };
-  }
-
-  const cut1 = 1 + Math.floor(Math.random() * (n - 2));
-  const cut2 = cut1 + 1 + Math.floor(Math.random() * (n - cut1 - 1));
-  const p0 = deck.slice(0, cut1);
-  const p1 = deck.slice(cut1, cut2);
-  const p2 = deck.slice(cut2);
-  return { deck: [...p1, ...p2, ...p0], partsCount: 3, cutPoints: [cut1, cut2] };
-}
-
-function getDealOrder(dealerSeat) {
-  const order = [];
-  for (let i = 0; i < 4; i++) {
-    order.push((dealerSeat - 1 - i + 8) % 4); // counter-clockwise from dealer's right
-  }
-  return order; // [right, opposite, left, dealer]
-}
-
-function drawCards(deal, seat, count, alsoFirstBatch) {
-  for (let i = 0; i < count; i++) {
-    const card = deal.deck[deal.pointer++];
-    deal.hands[seat].push(card);
-    if (alsoFirstBatch) deal.firstBatch[seat].push(card);
-  }
-}
-
-function prepareRoundDeal(dealerSeat) {
-  // dealer shuffles, then player on dealer's left cuts into 2 or 3 parts, dealer reassembles
-  const shuffled = shuffle(buildDeck());
-  const cutParts = Math.random() < 0.5 ? 2 : 3;
-  const cut = cutDeck(shuffled, cutParts);
-
-  const order = getDealOrder(dealerSeat);
-  const right = order[0];
-  const opposite = order[1];
-  const left = order[2];
-
-  const deal = {
-    dealerSeat,
-    deck: cut.deck,
-    pointer: 0,
-    order,
-    hands: [[], [], [], []],
-    firstBatch: [[], [], [], []],
-    cutInfo: { partsCount: cut.partsCount, cutPoints: cut.cutPoints },
-    pendingFirstBatchSeats: [left, dealerSeat],
-  };
-
-  // First batch, but pause before giving cards to trump chooser's teammate (left) and dealer.
-  drawCards(deal, right, 4, true);
-  drawCards(deal, opposite, 4, true);
-
-  return deal;
-}
-
-function completeRoundDealAfterTrump(deal) {
-  if (!deal || !Array.isArray(deal.pendingFirstBatchSeats)) return deal;
-
-  // Finish the first batch: trump chooser's teammate (left), then dealer.
-  for (const seat of deal.pendingFirstBatchSeats) {
-    if (deal.firstBatch[seat].length === 0) drawCards(deal, seat, 4, true);
-  }
-
-  // Second batch of 4 each, in the same order.
-  for (const seat of deal.order) drawCards(deal, seat, 4, false);
-
-  deal.pendingFirstBatchSeats = [];
-  return deal;
-}
-
 function cardBeats(challenger, incumbent, leadSuit, trumpSuit) {
   // challenger tries to beat incumbent
   if (challenger.suit === trumpSuit && incumbent.suit !== trumpSuit) return true;
@@ -126,9 +46,27 @@ function trickWinner(trick, leadSuit, trumpSuit) {
 }
 
 function dealHands(dealerIndex) {
-  const deal = prepareRoundDeal(dealerIndex);
-  completeRoundDealAfterTrump(deal);
-  return { hands: deal.hands, firstBatch: deal.firstBatch, fullHands: deal.hands };
+  const deck = shuffle(buildDeck());
+  // deal 4 cards first, then 4 more (counter-clockwise from dealer's right)
+  // player to dealer's right = (dealerIndex - 1 + 4) % 4
+  const hands = [[], [], [], []];
+  const order = [];
+  for (let i = 0; i < 4; i++) {
+    order.push((dealerIndex - 1 - i + 8) % 4); // counter-clockwise
+  }
+  // First batch of 4 each
+  for (let i = 0; i < 4; i++) {
+    for (let j = 0; j < 4; j++) {
+      hands[order[j]].push(deck[i * 4 + j]);
+    }
+  }
+  // Second batch of 4 each
+  for (let i = 0; i < 4; i++) {
+    for (let j = 0; j < 4; j++) {
+      hands[order[j]].push(deck[16 + i * 4 + j]);
+    }
+  }
+  return { hands, firstBatch: hands.map(h => h.slice(0, 4)), fullHands: hands };
 }
 
 function getValidCards(hand, leadSuit) {
@@ -153,7 +91,6 @@ function scoreRound(trickCounts, trumpChooserTeam) {
 
 module.exports = {
   SUITS, SUIT_NAMES, RANKS, RANK_ORDER,
-  buildDeck, shuffle, cutDeck, dealHands,
-  prepareRoundDeal, completeRoundDealAfterTrump,
+  buildDeck, shuffle, dealHands,
   trickWinner, getValidCards, scoreRound, cardBeats
 };
