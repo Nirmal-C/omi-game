@@ -448,6 +448,7 @@ body {
   .card.trick-card { width: 42px; height: 62px; }
 }
 </style>
+<script src="/socket.io/socket.io.js"></script>
 </head>
 <body>
 
@@ -641,7 +642,7 @@ body {
 // ══════════════════════════════════════════════
 //  STATE
 // ══════════════════════════════════════════════
-let ws = null;
+let socket = null;
 let mySeat = null;
 let myName = '';
 let roomCode = '';
@@ -665,20 +666,21 @@ function relativePosition(serverSeat) {
 //  CONNECTION
 // ══════════════════════════════════════════════
 function connectWS(onOpen) {
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  const url = `${proto}://${location.host}`;
-  ws = new WebSocket(url);
-
-  ws.onopen = () => onOpen();
-  ws.onmessage = (evt) => handleMessage(JSON.parse(evt.data));
-  ws.onclose = () => {
-    showToast('Disconnected from server. Refresh to reconnect.');
-  };
-  ws.onerror = () => showToast('Connection error.');
+  if (socket && socket.connected) { onOpen(); return; }
+  socket = io({ transports: ['websocket', 'polling'] });
+  socket.on('connect', onOpen);
+  socket.on('joined', (d) => handleMessage({ ...d, type: 'joined' }));
+  socket.on('player_joined', (d) => handleMessage({ ...d, type: 'player_joined' }));
+  socket.on('game_state', (d) => handleMessage({ type: 'game_state', state: d }));
+  socket.on('message', (d) => handleMessage(d));
+  socket.on('error', (d) => handleMessage({ type: 'error', text: d.text }));
+  socket.on('disconnect', () => showToast('Disconnected. Refresh to reconnect.'));
 }
 
 function send(obj) {
-  if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj));
+  if (!socket) return;
+  const { type, ...rest } = obj;
+  socket.emit(type, rest);
 }
 
 // ══════════════════════════════════════════════
