@@ -801,11 +801,10 @@ function renderGame() {
     tagEl.textContent = (p.seat === g.dealerSeat ? '🃏 ' : '') + p.name + (isActive ? ' ●' : '');
     tagEl.className = `name-tag ${isTeamA ? 'team-a' : 'team-b'}${isActive ? ' is-active' : ''}`;
 
-    // Card backs
-    const cardCount = g.hand ? 8 - (g.phase === 'playing' ? 0 : 0) : 8;
-    // We don't know exact counts, estimate from trick number
-    const tricksPlayed = (g.trickCounts[0] + g.trickCounts[1]);
-    const cardsLeft = Math.max(0, 8 - tricksPlayed);
+    // Card backs (server sends exact counts per seat)
+    const cardsLeft = Array.isArray(g.handCounts)
+      ? g.handCounts[p.seat]
+      : Math.max(0, 8 - (g.trickCounts[0] + g.trickCounts[1]));
     if (backEl) {
       const isHoriz = pos === 'north' || pos === 'south';
       backEl.innerHTML = Array(Math.min(cardsLeft, 8)).fill(0).map(() =>

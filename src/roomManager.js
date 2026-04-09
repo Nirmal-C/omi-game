@@ -1,8 +1,17 @@
 // omi-game/src/roomManager.js
 const { v4: uuidv4 } = require('uuid');
-const { dealHands, trickWinner, getValidCards, scoreRound, SUIT_NAMES } = require('./gameLogic');
+const { buildDeck, shuffle, cutDeck, trickWinner, getValidCards, scoreRound, SUIT_NAMES } = require('./gameLogic');
 
 const rooms = new Map();
+
+function dealToSeat(game, seatIndex, count) {
+  const start = game.deckIndex;
+  const end = start + count;
+  const slice = game.deck.slice(start, end);
+  game.hands[seatIndex].push(...slice);
+  game.deckIndex = end;
+  return slice;
+}
 
 function createRoom() {
   const code = Math.random().toString(36).substring(2, 6).toUpperCase();
@@ -68,11 +77,12 @@ function buildPlayerView(room, seatIndex) {
     lastTrickCards: g.lastTrickCards,
     roundResult: g.roundResult,
     hand: g.hands[seatIndex] || [],
-    validCards: g.phase === 'playing' && g.currentTurn === seatIndex
+    handCounts: g.hands.map(h => h.length),
+    validCards: room.state === 'playing' && g.currentTurn === seatIndex
       ? getValidCards(g.hands[seatIndex], g.leadSuit)
       : [],
     needsTrumpSelect: room.state === 'trump_select' && g.currentTurn === seatIndex,
-    firstBatchHand: g.phase === 'trump_select' ? g.firstBatch[seatIndex] : null,
+    firstBatchHand: room.state === 'trump_select' ? g.firstBatch[seatIndex] : null,
     gameOver: g.gameOver,
     winner: g.winner,
   };
@@ -85,9 +95,24 @@ function startRound(room) {
   g.trumpChooserSeat = (g.dealerSeat - 1 + 4) % 4; // player to dealer's right
   g.currentTurn = g.trumpChooserSeat;
 
-  const { firstBatch, fullHands } = dealHands(g.dealerSeat);
-  g.firstBatch = firstBatch;
-  g.hands = fullHands;
+  // Deck prep: dealer shuffles, dealer's left cuts into 2 or 3 piles, dealer re-stacks.
+  const cutterSeat = (g.dealerSeat + 1) % 4;
+  const cutParts = Math.random() < 0.5 ? 2 : 3;
+  g.deck = cutDeck(shuffle(buildDeck()), cutParts);
+  g.deckIndex = 0;
+
+  // Dealing (first 4s) with trump-rule:
+  // - Deal 4 to dealer's right (trump chooser)
+  // - Dealer may deal 4 to their own teammate (opposite)
+  // - Do NOT deal 4 to trump chooser's teammate (dealer's left) until trump declared
+  // - Dealer takes own 4 only after that
+  g.hands = [[], [], [], []];
+  g.firstBatch = [null, null, null, null];
+
+  const dealerMateSeat = (g.dealerSeat + 2) % 4;
+
+  g.firstBatch[g.trumpChooserSeat] = dealToSeat(g, g.trumpChooserSeat, 4);
+  g.firstBatch[dealerMateSeat] = dealToSeat(g, dealerMateSeat, 4);
   g.trumpSuit = null;
   g.currentTrick = [];
   g.trickCounts = { 0: 0, 1: 0 };
@@ -103,7 +128,8 @@ function startRound(room) {
 
   broadcast(room, {
     type: 'message',
-    text: `New round! ${room.players.find(p => p.seatIndex === g.trumpChooserSeat)?.name} chooses trumps.`
+    text: `New round! Dealer shuffled, ${room.players.find(p => p.seatIndex === cutterSeat)?.name || 'the left player'} cut (${cutParts} parts). ` +
+      `${room.players.find(p => p.seatIndex === g.trumpChooserSeat)?.name} chooses trumps.`
   });
 }
 
@@ -120,10 +146,35 @@ function handleAction(ws, data) {
       const suit = data.suit;
       if (!['♠','♥','♦','♣'].includes(suit)) return;
 
-      room.game.trumpSuit = suit;
-      room.game.trumpChooserTeam = player.seatIndex % 2 === 0 ? 0 : 1;
-      room.game.phase = 'playing';
-      room.game.currentTurn = room.game.trumpChooserSeat; // trump chooser leads first
+      const g = room.game;
+
+      // Finish dealing:
+      // 1) Give the trump-chooser's teammate their first four (they must not receive them before trump)
+      // 2) Dealer takes their own first four
+      // 3) Deal the second batch of four to everyone in the same order
+      const trumpChooserMateSeat = (g.trumpChooserSeat + 2) % 4; // opposite = teammate
+      if (!g.firstBatch[trumpChooserMateSeat]) {
+        g.firstBatch[trumpChooserMateSeat] = dealToSeat(g, trumpChooserMateSeat, 4);
+      }
+      if (!g.firstBatch[g.dealerSeat]) {
+        g.firstBatch[g.dealerSeat] = dealToSeat(g, g.dealerSeat, 4);
+      }
+
+      // Second batch: counter-clockwise from dealer's right (same as standard order)
+      const order = [
+        (g.dealerSeat - 1 + 4) % 4, // right (trump chooser)
+        (g.dealerSeat - 2 + 4) % 4, // opposite (dealer's teammate)
+        (g.dealerSeat - 3 + 4) % 4, // left (trump chooser's teammate)
+        g.dealerSeat,               // dealer
+      ];
+      for (const seat of order) {
+        dealToSeat(g, seat, 4);
+      }
+
+      g.trumpSuit = suit;
+      g.trumpChooserTeam = player.seatIndex % 2 === 0 ? 0 : 1;
+      g.phase = 'playing';
+      g.currentTurn = g.trumpChooserSeat; // trump chooser leads first
       room.state = 'playing';
 
       broadcast(room, {
@@ -211,6 +262,7 @@ function endRound(room) {
   const result = scoreRound(g.trickCounts, g.trumpChooserTeam);
   g.roundResult = result;
   room.state = 'round_end';
+  g.phase = 'round_end';
 
   let tokensToAward = result.tokens;
   if (g.pendingToken) {
@@ -234,6 +286,7 @@ function endRound(room) {
       g.gameOver = true;
       g.winner = g.teamTokens[0] >= 10 ? 0 : 1;
       room.state = 'game_over';
+      g.phase = 'game_over';
       const winTeam = g.winner === 0 ? 'Team A (N/S)' : 'Team B (E/W)';
       broadcast(room, { type: 'message', text: `🎉 GAME OVER! ${winTeam} wins with ${g.teamTokens[g.winner]} tokens!` });
     }
@@ -302,8 +355,10 @@ function initGame(room) {
     trumpChooserSeat: null,
     trumpChooserTeam: null,
     trumpSuit: null,
+    deck: [],
+    deckIndex: 0,
     hands: [[], [], [], []],
-    firstBatch: [[], [], [], []],
+    firstBatch: [null, null, null, null],
     currentTrick: [],
     leadSuit: null,
     currentTurn: 0,

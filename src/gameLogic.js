@@ -25,6 +25,28 @@ function shuffle(array) {
   return a;
 }
 
+function cutDeck(deck, parts = 2) {
+  const d = [...deck];
+  if (d.length < 2) return d;
+
+  const safeParts = parts === 3 ? 3 : 2;
+
+  if (safeParts === 2) {
+    const cutIndex = 1 + Math.floor(Math.random() * (d.length - 1));
+    const top = d.slice(0, cutIndex);
+    const bottom = d.slice(cutIndex);
+    return bottom.concat(top);
+  }
+
+  // 3-part cut: split into 3 piles then re-stack them in a different order.
+  const cut1 = 1 + Math.floor(Math.random() * (d.length - 2));
+  const cut2 = cut1 + 1 + Math.floor(Math.random() * (d.length - cut1 - 1));
+  const p1 = d.slice(0, cut1);
+  const p2 = d.slice(cut1, cut2);
+  const p3 = d.slice(cut2);
+  return p2.concat(p3, p1);
+}
+
 function cardBeats(challenger, incumbent, leadSuit, trumpSuit) {
   // challenger tries to beat incumbent
   if (challenger.suit === trumpSuit && incumbent.suit !== trumpSuit) return true;
@@ -91,6 +113,6 @@ function scoreRound(trickCounts, trumpChooserTeam) {
 
 module.exports = {
   SUITS, SUIT_NAMES, RANKS, RANK_ORDER,
-  buildDeck, shuffle, dealHands,
+  buildDeck, shuffle, cutDeck, dealHands,
   trickWinner, getValidCards, scoreRound, cardBeats
 };
