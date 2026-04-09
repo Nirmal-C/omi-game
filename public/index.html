@@ -744,7 +744,7 @@ function renderWaitingPlayers(players) {
     { seat: 3, team: 'b', label: 'West' },
   ];
   list.innerHTML = seats.map(s => {
-    const p = players.find(x => x.seat === s.seat);
+    const p = players.find(x => x.seat === s.seat && x.connected !== false);
     const youTag = p && p.seat === mySeat ? ' (You)' : '';
     const teamTag = `<span class="team-tag team-tag-${s.team}">Team ${s.team.toUpperCase()} · ${s.label}</span>`;
     if (p) {

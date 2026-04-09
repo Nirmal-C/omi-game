@@ -13,6 +13,27 @@ function dealToSeat(game, seatIndex, count) {
   return slice;
 }
 
+function broadcastWaitingPlayers(room) {
+  broadcast(room, {
+    type: 'player_joined',
+    players: room.players.map(p => ({ name: p.name, seat: p.seatIndex, connected: p.connected }))
+  });
+}
+
+function findPlayerByNameDisconnected(room, name) {
+  if (!name) return null;
+  return room.players.find(p => p.name === name && !p.connected);
+}
+
+function findAvailableSeat(room) {
+  for (let seat = 0; seat < 4; seat++) {
+    const p = room.players.find(x => x.seatIndex === seat);
+    if (!p) return seat;
+    if (!p.connected) return seat;
+  }
+  return null;
+}
+
 function createRoom() {
   const code = Math.random().toString(36).substring(2, 6).toUpperCase();
   const room = {
@@ -307,13 +328,8 @@ function handleJoin(ws, data) {
     }
   }
 
-  if (room.players.length >= 4 && !data.rejoin) {
-    ws.send(JSON.stringify({ type: 'error', text: 'Room is full (4 players max).' }));
-    return;
-  }
-
   // Reconnection logic
-  const existing = room.players.find(p => p.name === data.name && !p.connected);
+  const existing = findPlayerByNameDisconnected(room, data.name);
   if (existing) {
     existing.ws = ws;
     existing.connected = true;
@@ -321,11 +337,26 @@ function handleJoin(ws, data) {
     ws._roomCode = room.code;
     sendTo(existing, { type: 'joined', code: room.code, seat: existing.seatIndex, name: existing.name });
     broadcast(room, { type: 'message', text: `${existing.name} reconnected.` }, existing.id);
+    broadcastWaitingPlayers(room);
     sendGameState(room);
     return;
   }
 
-  const seatIndex = room.players.length;
+  // If a game is already running, only allow disconnected players to rejoin (not new seats).
+  if (room.game && room.state !== 'waiting') {
+    ws.send(JSON.stringify({ type: 'error', text: 'Game already in progress. Only disconnected players can rejoin.' }));
+    return;
+  }
+
+  const seatIndex = findAvailableSeat(room);
+  if (seatIndex === null) {
+    ws.send(JSON.stringify({ type: 'error', text: 'Room is full (4 players max).' }));
+    return;
+  }
+
+  // If we're reusing a disconnected seat, evict the old disconnected record so we don't duplicate seats/names.
+  room.players = room.players.filter(p => !(p.seatIndex === seatIndex && !p.connected));
+
   const playerId = uuidv4();
   const player = {
     id: playerId,
@@ -339,10 +370,11 @@ function handleJoin(ws, data) {
   ws._roomCode = room.code;
 
   sendTo(player, { type: 'joined', code: room.code, seat: seatIndex, name: player.name });
-  broadcast(room, { type: 'player_joined', players: room.players.map(p => ({ name: p.name, seat: p.seatIndex, connected: p.connected })) });
+  broadcastWaitingPlayers(room);
   broadcast(room, { type: 'message', text: `${player.name} joined (seat ${seatIndex + 1}/4).` });
 
-  if (room.players.length === 4 && !room.game) {
+  const connectedCount = room.players.filter(p => p.connected).length;
+  if (connectedCount === 4 && !room.game) {
     // Auto-start game
     initGame(room);
   }
@@ -385,6 +417,7 @@ function handleDisconnect(ws) {
   player.connected = false;
   player.ws = null;
   broadcast(room, { type: 'message', text: `${player.name} disconnected. They can rejoin with code ${room.code}.` });
+  broadcastWaitingPlayers(room);
   sendGameState(room);
 }
 
