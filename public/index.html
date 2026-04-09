@@ -804,10 +804,10 @@ function renderGame() {
     tagEl.className = `name-tag ${isTeamA ? 'team-a' : 'team-b'}${isActive ? ' is-active' : ''}`;
 
     // Card backs
-    const cardCount = g.hand ? 8 - (g.phase === 'playing' ? 0 : 0) : 8;
-    // We don't know exact counts, estimate from trick number
+    const knownCount = Array.isArray(g.handCounts) ? g.handCounts[p.seat] : null;
     const tricksPlayed = (g.trickCounts[0] + g.trickCounts[1]);
-    const cardsLeft = Math.max(0, 8 - tricksPlayed);
+    const estimatedLeft = Math.max(0, 8 - tricksPlayed);
+    const cardsLeft = typeof knownCount === 'number' ? knownCount : estimatedLeft;
     if (backEl) {
       const isHoriz = pos === 'north' || pos === 'south';
       backEl.innerHTML = Array(Math.min(cardsLeft, 8)).fill(0).map(() =>

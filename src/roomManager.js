@@ -1,6 +1,6 @@
 // src/roomManager.js — Socket.io version
 const { v4: uuidv4 } = require('uuid');
-const { dealHands, trickWinner, getValidCards, scoreRound, SUIT_NAMES } = require('./gameLogic');
+const { prepareRoundDeal, completeRoundDealAfterTrump, trickWinner, getValidCards, scoreRound, SUIT_NAMES } = require('./gameLogic');
 
 const rooms = new Map();
 
@@ -40,6 +40,7 @@ function buildPlayerView(room, seatIndex) {
     lastTrickCards: g.lastTrickCards,
     roundResult: g.roundResult,
     hand: g.hands[seatIndex] || [],
+    handCounts: Array.isArray(g.hands) ? g.hands.map(h => (h ? h.length : 0)) : [0, 0, 0, 0],
     validCards: room.state === 'playing' && g.currentTurn === seatIndex
       ? getValidCards(g.hands[seatIndex], g.leadSuit) : [],
     needsTrumpSelect: room.state === 'trump_select' && g.currentTurn === seatIndex,
@@ -68,6 +69,7 @@ function initGame(io, room) {
   room.game = {
     dealerSeat: (dealerSeat + 1) % 4,
     trumpChooserSeat: null, trumpChooserTeam: null, trumpSuit: null,
+    deal: null,
     hands: [[], [], [], []], firstBatch: [[], [], [], []],
     currentTrick: [], leadSuit: null, currentTurn: 0,
     trickCounts: { 0: 0, 1: 0 }, teamTokens: { 0: 0, 1: 0 },
@@ -84,16 +86,22 @@ function startRound(io, room) {
   g.dealerSeat = (g.dealerSeat - 1 + 4) % 4;
   g.trumpChooserSeat = (g.dealerSeat - 1 + 4) % 4;
   g.currentTurn = g.trumpChooserSeat;
-  const { firstBatch, fullHands } = dealHands(g.dealerSeat);
-  g.firstBatch = firstBatch;
-  g.hands = fullHands;
+
+  const deal = prepareRoundDeal(g.dealerSeat);
+  g.deal = deal;
+  g.firstBatch = deal.firstBatch;
+  g.hands = deal.hands;
   g.trumpSuit = null; g.currentTrick = []; g.trickCounts = { 0: 0, 1: 0 };
   g.leadSuit = null; g.trickNumber = 0; g.lastTrickWinner = null;
   g.lastTrickCards = null; g.roundResult = null; g.phase = 'trump_select';
   room.state = 'trump_select';
   sendGameState(io, room);
   const chooserName = room.players.find(p => p.seatIndex === g.trumpChooserSeat)?.name || '?';
-  broadcastChat(io, room, `New round! ${chooserName} chooses trumps.`);
+  const dealerName = room.players.find(p => p.seatIndex === g.dealerSeat)?.name || '?';
+  const cutterSeat = (g.dealerSeat + 1) % 4;
+  const cutterName = room.players.find(p => p.seatIndex === cutterSeat)?.name || '?';
+  broadcastChat(io, room, `New round! ${dealerName} shuffles. ${cutterName} cuts into ${deal.cutInfo.partsCount} part${deal.cutInfo.partsCount !== 1 ? 's' : ''}.`);
+  broadcastChat(io, room, `${chooserName} (dealer's right) gets 4 cards to choose trumps.`);
 }
 
 function endRound(io, room) {
@@ -175,6 +183,13 @@ function handleAction(socket, data, io) {
       if (room.state !== 'trump_select' || g.currentTurn !== player.seatIndex) return;
       const suit = data.suit;
       if (!['♠', '♥', '♦', '♣'].includes(suit)) return;
+
+      if (g.deal) {
+        completeRoundDealAfterTrump(g.deal);
+        g.firstBatch = g.deal.firstBatch;
+        g.hands = g.deal.hands;
+        g.deal = null;
+      }
       g.trumpSuit = suit;
       g.trumpChooserTeam = player.seatIndex % 2 === 0 ? 0 : 1;
       g.phase = 'playing'; g.currentTurn = g.trumpChooserSeat; room.state = 'playing';
