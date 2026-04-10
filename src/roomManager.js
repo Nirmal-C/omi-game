@@ -98,7 +98,10 @@ function buildPlayerView(room, seatIndex) {
     lastTrickCards: g.lastTrickCards,
     roundResult: g.roundResult,
     hand: g.hands[seatIndex] || [],
-    handCounts: g.hands.map(h => h.length),
+    // During trump_select, hands not yet fully dealt show 0 — use firstBatch length as fallback
+    handCounts: g.hands.map((h, i) =>
+      h.length > 0 ? h.length : (g.firstBatch && g.firstBatch[i] ? g.firstBatch[i].length : 0)
+    ),
     validCards: room.state === 'playing' && g.currentTurn === seatIndex
       ? getValidCards(g.hands[seatIndex], g.leadSuit)
       : [],
@@ -112,6 +115,7 @@ function buildPlayerView(room, seatIndex) {
 
 function startRound(room) {
   const g = room.game;
+  g._startingRound = false; // clear the double-trigger lock
   g.dealerSeat = (g.dealerSeat - 1 + 4) % 4; // dealer moves right (counter-clockwise)
   g.trumpChooserSeat = (g.dealerSeat - 1 + 4) % 4; // player to dealer's right
   g.currentTurn = g.trumpChooserSeat;
@@ -270,9 +274,10 @@ function handleAction(ws, data) {
 
     case 'next_round': {
       if (room.state !== 'round_end') return;
-      if (!room.game.gameOver) {
-        startRound(room);
-      }
+      if (room.game.gameOver) return;
+      if (room.game._startingRound) return; // prevent double-trigger
+      room.game._startingRound = true;
+      startRound(room);
       break;
     }
   }
@@ -328,14 +333,26 @@ function handleJoin(ws, data) {
     }
   }
 
-  // Reconnection logic
-  const existing = findPlayerByNameDisconnected(room, data.name);
+  // Reconnection logic — try token first, then fall back to name match
+  let existing = null;
+  if (data.rejoinToken) {
+    existing = room.players.find(p => p.rejoinToken === data.rejoinToken && !p.connected);
+  }
+  if (!existing) {
+    existing = findPlayerByNameDisconnected(room, data.name);
+  }
   if (existing) {
     existing.ws = ws;
     existing.connected = true;
     ws._playerId = existing.id;
     ws._roomCode = room.code;
-    sendTo(existing, { type: 'joined', code: room.code, seat: existing.seatIndex, name: existing.name });
+    sendTo(existing, {
+      type: 'joined',
+      code: room.code,
+      seat: existing.seatIndex,
+      name: existing.name,
+      rejoinToken: existing.rejoinToken,
+    });
     broadcast(room, { type: 'message', text: `${existing.name} reconnected.` }, existing.id);
     broadcastWaitingPlayers(room);
     sendGameState(room);
@@ -358,18 +375,20 @@ function handleJoin(ws, data) {
   room.players = room.players.filter(p => !(p.seatIndex === seatIndex && !p.connected));
 
   const playerId = uuidv4();
+  const rejoinToken = uuidv4();
   const player = {
     id: playerId,
     name: data.name || `Player ${seatIndex + 1}`,
     ws,
     seatIndex,
     connected: true,
+    rejoinToken,
   };
   room.players.push(player);
   ws._playerId = playerId;
   ws._roomCode = room.code;
 
-  sendTo(player, { type: 'joined', code: room.code, seat: seatIndex, name: player.name });
+  sendTo(player, { type: 'joined', code: room.code, seat: seatIndex, name: player.name, rejoinToken });
   broadcastWaitingPlayers(room);
   broadcast(room, { type: 'message', text: `${player.name} joined (seat ${seatIndex + 1}/4).` });
 

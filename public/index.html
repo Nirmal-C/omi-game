@@ -672,9 +672,25 @@ function connectWS(onOpen) {
   ws.onopen = () => onOpen();
   ws.onmessage = (evt) => handleMessage(JSON.parse(evt.data));
   ws.onclose = () => {
-    showToast('Disconnected from server. Refresh to reconnect.');
+    // Attempt auto-rejoin if we have a saved session
+    let session = null;
+    try { session = JSON.parse(sessionStorage.getItem('omi_session')); } catch(e) {}
+
+    if (session && session.rejoinToken) {
+      showToast('Connection lost — reconnecting…');
+      setTimeout(() => {
+        connectWS(() => send({
+          type: 'join',
+          name: session.name,
+          code: session.code,
+          rejoinToken: session.rejoinToken,
+        }));
+      }, 2000);
+    } else {
+      showToast('Disconnected from server. Refresh to reconnect.');
+    }
   };
-  ws.onerror = () => showToast('Connection error.');
+  ws.onerror = () => {}; // onclose fires after onerror, so let that handle UI
 }
 
 function send(obj) {
@@ -709,6 +725,18 @@ function handleMessage(msg) {
     case 'joined':
       mySeat = msg.seat;
       roomCode = msg.code;
+      myName = msg.name;
+      // Persist session for auto-rejoin after disconnection
+      if (msg.rejoinToken) {
+        try {
+          sessionStorage.setItem('omi_session', JSON.stringify({
+            code: msg.code,
+            name: msg.name,
+            seat: msg.seat,
+            rejoinToken: msg.rejoinToken,
+          }));
+        } catch(e) {}
+      }
       showScreen('waiting');
       document.getElementById('display-code').textContent = msg.code;
       break;
@@ -719,6 +747,10 @@ function handleMessage(msg) {
 
     case 'game_state':
       gameState = msg.state;
+      // Clear saved session once the game is fully over
+      if (msg.state && msg.state.gameOver) {
+        try { sessionStorage.removeItem('omi_session'); } catch(e) {}
+      }
       renderGame();
       break;
 
@@ -1061,6 +1093,21 @@ function showToast(text) {
 }
 
 function doAction() {} // placeholder
+
+// On page load: if there's a saved session, try to auto-rejoin
+(function tryAutoRejoin() {
+  let session = null;
+  try { session = JSON.parse(sessionStorage.getItem('omi_session')); } catch(e) {}
+  if (session && session.rejoinToken && session.code && session.name) {
+    showToast(`Rejoining room ${session.code} as ${session.name}…`);
+    connectWS(() => send({
+      type: 'join',
+      name: session.name,
+      code: session.code,
+      rejoinToken: session.rejoinToken,
+    }));
+  }
+})();
 
 // Enter key support
 document.addEventListener('keydown', e => {
