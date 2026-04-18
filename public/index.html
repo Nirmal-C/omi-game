@@ -309,6 +309,53 @@ body {
 .card.trick-card:hover { transform: none; }
 .card.trump-card { box-shadow: 0 0 0 2px var(--gold); }
 
+/* Half Court */
+.half-court-badge {
+  display: inline-block;
+  background: rgba(147,197,253,0.15);
+  border: 1px solid rgba(147,197,253,0.5);
+  color: #93c5fd;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 12px;
+  letter-spacing: 1px;
+  margin-left: 6px;
+}
+
+/* Kapothi */
+.kapothi-info-box {
+  background: rgba(245,200,66,0.1);
+  border: 1px solid rgba(245,200,66,0.3);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 13px;
+  color: var(--gold-light);
+  margin-top: 12px;
+  line-height: 1.7;
+}
+.kapothi-badge {
+  display: inline-block;
+  background: rgba(245,200,66,0.2);
+  border: 1px solid var(--gold);
+  color: var(--gold);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 12px;
+  letter-spacing: 1px;
+  margin-left: 6px;
+}
+
+/* Flying card animation */
+.card-flying {
+  position: fixed;
+  z-index: 1000;
+  pointer-events: none;
+  margin: 0;
+  transition: left 0.35s cubic-bezier(0.4,0,0.2,1), top 0.35s cubic-bezier(0.4,0,0.2,1), transform 0.35s ease, opacity 0.35s ease;
+}
+
 /* Hand */
 .hand-area {
   background: rgba(0,0,0,0.3);
@@ -520,7 +567,7 @@ body {
     </div>
     <div>
       <div class="tricks-block" id="tricks-display">—</div>
-      <div class="trump-block">
+      <div class="trump-block" id="trump-label">
         <div class="tsuit" id="trump-suit-display">—</div>
         <div class="tlabel">TRUMP</div>
       </div>
@@ -601,6 +648,41 @@ body {
     <p style="font-size:12px;margin-top:8px;">
       Tip: Choose the suit you have the most cards in. Between two equal suits, prefer the one without the Ace — the Ace wins regardless.
     </p>
+  </div>
+</div>
+
+<!-- ═══ HALF COURT OFFER OVERLAY ═══ -->
+<div class="overlay hidden" id="half-court-overlay">
+  <div class="overlay-box">
+    <div style="font-size:44px;margin-bottom:6px;">🃏</div>
+    <h2 style="color:var(--gold)">Half Court?</h2>
+    <p>These are your 4 cards. Declare <strong>Half Court</strong> to pick trumps<br>and challenge your team to win all 4 tricks.</p>
+    <div class="hand-cards" id="half-court-cards" style="justify-content:center;margin:14px 0;"></div>
+    <div id="half-court-buttons">
+      <div style="display:flex;gap:12px;justify-content:center;">
+        <button class="trump-btn" style="width:140px;height:72px;font-size:13px;font-weight:700;" onclick="declareHalfCourt()">🃏 DECLARE<br>HALF COURT</button>
+        <button class="trump-btn" style="width:140px;height:72px;font-size:13px;" onclick="passHalfCourt()">✋ PASS</button>
+      </div>
+    </div>
+    <div id="half-court-wait" class="hidden" style="color:var(--text-muted);font-size:13px;margin-top:14px;">
+      You passed. Waiting for others to decide<span class="waiting-dots"></span>
+    </div>
+    <p style="font-size:11px;color:var(--text-muted);margin-top:12px;">Win all 4 tricks = <strong style="color:var(--gold)">+3 tokens</strong> · Fail = opponent gets <strong style="color:var(--team-b-light)">3 tokens</strong></p>
+  </div>
+</div>
+
+<!-- ═══ KAPOTHI DECISION OVERLAY ═══ -->
+<div class="overlay hidden" id="kapothi-overlay">
+  <div class="overlay-box">
+    <div style="font-size:48px;margin-bottom:8px;">⚡</div>
+    <h2 style="color:var(--gold)">KAPOTHI!</h2>
+    <p>Your team won 4 consecutive tricks!<br>Do you want to declare <strong>Kapothi</strong>?</p>
+    <div class="kapothi-info-box" id="kapothi-info-text"></div>
+    <div style="display:flex;gap:12px;justify-content:center;margin-top:20px;">
+      <button class="trump-btn" style="width:130px;height:70px;font-size:14px;font-weight:700;" onclick="declareKapothi(true)">⚡ DECLARE<br>KAPOTHI</button>
+      <button class="trump-btn" style="width:130px;height:70px;font-size:14px;" onclick="declareKapothi(false)">✋ CONTINUE<br>NORMAL</button>
+    </div>
+    <p style="font-size:11px;color:var(--text-muted);margin-top:12px;">If you declare and fail to win all 8 tricks,<br>the opponent gets <strong style="color:var(--team-b-light)">3 tokens</strong>.</p>
   </div>
 </div>
 
@@ -863,11 +945,62 @@ function renderGame() {
   // Info bar
   renderInfoBar(g);
 
+  // Kapothi badge in top bar
+  const trumpBlock = document.getElementById('trump-label');
+  if (trumpBlock) {
+    const badge = document.getElementById('kapothi-active-badge');
+    if (g.kapothiDeclared !== null) {
+      if (!badge) {
+        const el = document.createElement('span');
+        el.id = 'kapothi-active-badge';
+        el.className = 'kapothi-badge';
+        el.textContent = '⚡ KAPOTHI';
+        trumpBlock.appendChild(el);
+      }
+    } else if (badge) {
+      badge.remove();
+    }
+  }
+
   // Overlays
-  if (g.phase === 'trump_select' && g.needsTrumpSelect) {
+  if (g.needsTrumpSelect || g.needsHalfCourtTrumpSelect) {
     showTrumpOverlay(g);
   } else {
     document.getElementById('trump-overlay').classList.add('hidden');
+  }
+
+  // Half Court overlay
+  if (g.phase === 'half_court_offer' || g.phase === 'half_court_select') {
+    if (g.phase === 'half_court_offer') {
+      showHalfCourtOverlay(g);
+    } else {
+      document.getElementById('half-court-overlay').classList.add('hidden');
+    }
+  } else {
+    document.getElementById('half-court-overlay').classList.add('hidden');
+  }
+
+  // Half Court badge in top bar
+  const trumpLabelEl = document.getElementById('trump-label');
+  const existingHCBadge = document.getElementById('half-court-active-badge');
+  if (trumpLabelEl) {
+    if (g.halfCourtDeclarerTeam !== null) {
+      if (!existingHCBadge) {
+        const el = document.createElement('span');
+        el.id = 'half-court-active-badge';
+        el.className = 'half-court-badge';
+        el.textContent = '🃏 HALF COURT';
+        trumpLabelEl.appendChild(el);
+      }
+    } else if (existingHCBadge) {
+      existingHCBadge.remove();
+    }
+  }
+
+  if (g.needsKapothiDecide) {
+    showKapothiOverlay(g);
+  } else {
+    document.getElementById('kapothi-overlay').classList.add('hidden');
   }
 
   if (g.phase === 'round_end' || g.phase === 'game_over') {
@@ -897,13 +1030,20 @@ function renderHand(g) {
   const labelEl = document.getElementById('hand-label');
   selectedCard = null;
 
+  if (g.phase === 'half_court_offer' || g.phase === 'half_court_select') {
+    handEl.innerHTML = '';
+    labelEl.textContent = 'YOUR FIRST 4 CARDS';
+    return;
+  }
+
   if (g.phase === 'trump_select' && g.needsTrumpSelect) {
     handEl.innerHTML = '';
     labelEl.textContent = 'YOUR FIRST 4 CARDS — Choose trumps';
     return;
   }
 
-  const hand = g.hand || [];
+  const suitOrder = { '♥': 0, '♠': 1, '♦': 2, '♣': 3 };
+  const hand = (g.hand || []).slice().sort((a, b) => (suitOrder[a.suit] ?? 4) - (suitOrder[b.suit] ?? 4));
   const valid = g.validCards || [];
   const isMyTurn = g.currentTurn === mySeat && g.phase === 'playing';
   labelEl.textContent = isMyTurn ? '▶ YOUR TURN — Click a card to play' : 'YOUR HAND';
@@ -920,6 +1060,30 @@ function renderHand(g) {
 function renderInfoBar(g) {
   const bar = document.getElementById('info-bar');
   const isMyTurn = g.currentTurn === mySeat;
+
+  if (g.phase === 'half_court_offer') {
+    const myPassed = g.halfCourtPassed && g.halfCourtPassed.includes(mySeat);
+    if (!myPassed) {
+      bar.innerHTML = 'Decide: declare <strong>Half Court</strong> or pass.';
+      bar.className = 'info-bar your-turn';
+    } else {
+      bar.innerHTML = `You passed. Waiting for others... (${g.halfCourtPassed.length}/4 passed)`;
+      bar.className = 'info-bar';
+    }
+    return;
+  }
+
+  if (g.phase === 'half_court_select') {
+    if (g.halfCourtDeclarer === mySeat) {
+      bar.innerHTML = '<strong>Half Court!</strong> Choose your trump suit.';
+      bar.className = 'info-bar your-turn';
+    } else {
+      const declarer = g.players.find(p => p.seat === g.halfCourtDeclarer);
+      bar.innerHTML = `Waiting for <strong>${declarer?.name || '?'}</strong> to choose trumps (Half Court)...`;
+      bar.className = 'info-bar';
+    }
+    return;
+  }
 
   if (g.phase === 'trump_select') {
     const chooser = g.players.find(p => p.seat === g.trumpChooserSeat);
@@ -945,6 +1109,20 @@ function renderInfoBar(g) {
     return;
   }
 
+  if (g.phase === 'kapothi_decision') {
+    const decidingTeam = g.kapothiDecisionTeam;
+    const myTeam = mySeat % 2 === 0 ? 0 : 1;
+    if (myTeam === decidingTeam) {
+      bar.innerHTML = '<strong>Your team!</strong> Decide whether to declare Kapothi.';
+      bar.className = 'info-bar your-turn';
+    } else {
+      const teamName = decidingTeam === 0 ? 'Team A' : 'Team B';
+      bar.innerHTML = `Waiting for <strong>${teamName}</strong> to decide on Kapothi...`;
+      bar.className = 'info-bar';
+    }
+    return;
+  }
+
   bar.innerHTML = '—';
   bar.className = 'info-bar';
 }
@@ -953,26 +1131,76 @@ function selectCard(cardId) {
   const g = gameState;
   if (!g || g.currentTurn !== mySeat) return;
 
-  if (selectedCard === cardId) {
-    // Play it
-    send({ type: 'action', action: 'play_card', cardId });
-    selectedCard = null;
-    return;
+  // Find the card element in the sorted hand
+  const suitOrder = { '♥': 0, '♠': 1, '♦': 2, '♣': 3 };
+  const sortedHand = (g.hand || []).slice().sort((a, b) => (suitOrder[a.suit] ?? 4) - (suitOrder[b.suit] ?? 4));
+  const cardIndex = sortedHand.findIndex(c => c.id === cardId);
+  const cardEls = document.querySelectorAll('#your-hand .card');
+  const cardEl = cardEls[cardIndex];
+  const trickSlot = document.getElementById('trick-south');
+
+  if (cardEl && trickSlot) {
+    const from = cardEl.getBoundingClientRect();
+    const to = trickSlot.getBoundingClientRect();
+
+    const clone = cardEl.cloneNode(true);
+    clone.className = 'card-flying ' + cardEl.className;
+    clone.style.left = from.left + 'px';
+    clone.style.top = from.top + 'px';
+    clone.style.width = from.width + 'px';
+    clone.style.height = from.height + 'px';
+    document.body.appendChild(clone);
+
+    // Double rAF ensures transition fires after element is painted
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      clone.style.left = (to.left + (to.width - from.width) / 2) + 'px';
+      clone.style.top  = (to.top  + (to.height - from.height) / 2) + 'px';
+      clone.style.transform = 'scale(0.9)';
+    }));
+
+    setTimeout(() => clone.remove(), 400);
   }
 
-  selectedCard = cardId;
+  send({ type: 'action', action: 'play_card', cardId });
+  selectedCard = null;
+}
 
-  // Highlight
-  const cards = document.querySelectorAll('#your-hand .card');
-  const hand = g.hand || [];
-  cards.forEach((el, i) => {
-    const card = hand[i];
-    if (card && card.id === cardId) {
-      el.classList.add('selected');
-    } else {
-      el.classList.remove('selected');
-    }
-  });
+function showHalfCourtOverlay(g) {
+  const overlay = document.getElementById('half-court-overlay');
+  overlay.classList.remove('hidden');
+
+  const cards = g.firstBatchHand || g.hand.slice(0, 4);
+  document.getElementById('half-court-cards').innerHTML = cards.map(card =>
+    `<div class="card ${isRed(card.suit) ? 'red' : 'black'}" style="cursor:default">${makeCardInner(card)}</div>`
+  ).join('');
+
+  const myPassed = g.halfCourtPassed && g.halfCourtPassed.includes(mySeat);
+  document.getElementById('half-court-buttons').classList.toggle('hidden', myPassed);
+  document.getElementById('half-court-wait').classList.toggle('hidden', !myPassed);
+}
+
+function declareHalfCourt() {
+  send({ type: 'action', action: 'half_court_declare' });
+  document.getElementById('half-court-overlay').classList.add('hidden');
+}
+
+function passHalfCourt() {
+  send({ type: 'action', action: 'half_court_pass' });
+  // Server will respond with updated state; overlay re-renders to show wait message
+}
+
+function showKapothiOverlay(g) {
+  document.getElementById('kapothi-overlay').classList.remove('hidden');
+  const isChooserTeam = (mySeat % 2 === 0 ? 0 : 1) === g.trumpChooserTeam;
+  const bonus = isChooserTeam ? 1 : 2;
+  document.getElementById('kapothi-info-text').innerHTML =
+    `Win all <strong>8 tricks</strong> → earn <strong style="color:var(--gold)">+${bonus} extra token${bonus > 1 ? 's' : ''}</strong> (total 3+${bonus} = ${3 + bonus} tokens)<br>
+     Fail → opponent gets <strong style="color:var(--team-b-light)">3 tokens</strong>`;
+}
+
+function declareKapothi(declare) {
+  send({ type: 'action', action: 'kapothi_decide', declare });
+  document.getElementById('kapothi-overlay').classList.add('hidden');
 }
 
 function chooseTrump(suit) {
@@ -984,7 +1212,12 @@ function showTrumpOverlay(g) {
   const overlay = document.getElementById('trump-overlay');
   overlay.classList.remove('hidden');
 
-  // Show first 4 cards
+  const isHalfCourt = g.phase === 'half_court_select';
+  overlay.querySelector('h2').textContent = isHalfCourt ? '🃏 Choose Trumps — Half Court' : 'Choose Trumps';
+  overlay.querySelector('p').textContent = isHalfCourt
+    ? 'You declared Half Court. Choose your trump suit — your team must win all 4 tricks!'
+    : 'You are the trump chooser. Look at your first 4 cards and pick a suit.';
+
   const first4 = g.firstBatchHand || g.hand.slice(0, 4);
   document.getElementById('first-batch-cards').innerHTML = first4.map(card =>
     `<div class="card ${isRed(card.suit) ? 'red' : 'black'}" style="cursor:default">${makeCardInner(card)}</div>`
@@ -1009,11 +1242,43 @@ function renderRoundResult(g) {
     document.getElementById('result-tokens').textContent = '+0 tokens (bonus next round)';
   } else {
     const winTeamName = r.winner === 0 ? teamAName : teamBName;
-    const isKapothi = r.kapothi;
-    document.getElementById('result-title').textContent = isKapothi ? '🔥 KAPOTHI!' : 'Round Won!';
-    document.getElementById('result-emoji').textContent = isKapothi ? '🃏' : '🎉';
-    document.getElementById('result-text').textContent = `${winTeamName} win!`;
-    document.getElementById('result-sub').textContent = isKapothi ? 'All 8 tricks!' : `${r.winner === g.trumpChooserTeam ? 'Trump choosers win' : 'Non-choosers win (×2 tokens)'}`;
+    let title, emoji, sub;
+    if (r.halfCourt && r.halfCourtFailed) {
+      const failTeamName = r.winner === 0 ? teamBName : teamAName;
+      title = '💥 HALF COURT FAILED!';
+      emoji = '😱';
+      document.getElementById('result-text').textContent = `${failTeamName} couldn't win all 4 tricks!`;
+      sub = `${winTeamName} gets the penalty tokens.`;
+    } else if (r.halfCourt) {
+      title = '🃏 HALF COURT!';
+      emoji = '🏆';
+      document.getElementById('result-text').textContent = `${winTeamName} won all 4 tricks!`;
+      sub = 'Half Court success! +3 tokens';
+    } else if (r.kapothiDeclared && r.kapothiFailed) {
+      const loserTeamName = r.winner === 0 ? teamBName : teamAName;
+      title = '💥 KAPOTHI FAILED!';
+      emoji = '😱';
+      document.getElementById('result-text').textContent = `${loserTeamName} couldn't win all 8!`;
+      sub = `${winTeamName} gets the penalty tokens.`;
+    } else if (r.kapothiDeclared) {
+      title = '⚡ DECLARED KAPOTHI!';
+      emoji = '🏆';
+      document.getElementById('result-text').textContent = `${winTeamName} won all 8 tricks!`;
+      sub = `Kapothi bonus earned!`;
+    } else if (r.kapothi) {
+      title = '🔥 KAPOTHI!';
+      emoji = '🃏';
+      document.getElementById('result-text').textContent = `${winTeamName} win!`;
+      sub = 'All 8 tricks!';
+    } else {
+      title = 'Round Won!';
+      emoji = '🎉';
+      document.getElementById('result-text').textContent = `${winTeamName} win!`;
+      sub = r.winner === g.trumpChooserTeam ? 'Trump choosers win' : 'Non-choosers win (×2 tokens)';
+    }
+    document.getElementById('result-title').textContent = title;
+    document.getElementById('result-emoji').textContent = emoji;
+    document.getElementById('result-sub').textContent = sub;
     document.getElementById('result-tokens').textContent = `+${r.tokens} token${r.tokens !== 1 ? 's' : ''}`;
   }
 

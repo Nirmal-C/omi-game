@@ -98,11 +98,34 @@ function getValidCards(hand, leadSuit) {
   return hand.map(c => c.id); // can play anything
 }
 
-function scoreRound(trickCounts, trumpChooserTeam) {
+function scoreRound(trickCounts, trumpChooserTeam, kapothiDeclaredByTeam, halfCourtDeclarerTeam) {
   // trickCounts: {0: n, 1: n} for team 0 (N/S) and team 1 (E/W)
+
+  // Half Court scoring (highest priority — only 4 tricks)
+  if (halfCourtDeclarerTeam !== null && halfCourtDeclarerTeam !== undefined) {
+    if (trickCounts[halfCourtDeclarerTeam] === 4) {
+      return { winner: halfCourtDeclarerTeam, tokens: 3, halfCourt: true };
+    } else {
+      return { winner: 1 - halfCourtDeclarerTeam, tokens: 3, halfCourt: true, halfCourtFailed: true };
+    }
+  }
+
   const chooserTricks = trickCounts[trumpChooserTeam];
   const otherTricks = trickCounts[1 - trumpChooserTeam];
   const otherTeam = 1 - trumpChooserTeam;
+
+  // Declared Kapothi scoring
+  if (kapothiDeclaredByTeam !== null && kapothiDeclaredByTeam !== undefined) {
+    const declaredTricks = trickCounts[kapothiDeclaredByTeam];
+    if (declaredTricks === 8) {
+      // Success: base 3 tokens + 1 bonus if trump chooser, +2 if not
+      const isChooser = kapothiDeclaredByTeam === trumpChooserTeam;
+      return { winner: kapothiDeclaredByTeam, tokens: isChooser ? 4 : 5, kapothi: true, kapothiDeclared: true };
+    } else {
+      // Failed: other team gets 3 tokens as penalty
+      return { winner: 1 - kapothiDeclaredByTeam, tokens: 3, kapothi: false, kapothiDeclared: true, kapothiFailed: true };
+    }
+  }
 
   if (chooserTricks === 8) return { winner: trumpChooserTeam, tokens: 3, kapothi: true };
   if (otherTricks === 8) return { winner: otherTeam, tokens: 3, kapothi: true };
