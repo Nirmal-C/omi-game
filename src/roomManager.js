@@ -109,8 +109,7 @@ function buildPlayerView(room, seatIndex) {
       ? getValidCards(g.hands[seatIndex], g.leadSuit)
       : [],
     needsTrumpSelect: room.state === 'trump_select' && g.currentTurn === seatIndex,
-    needsHalfCourtTrumpSelect: room.state === 'half_court_select' && g.currentTurn === seatIndex,
-    firstBatchHand: ['trump_select', 'half_court_offer', 'half_court_select'].includes(room.state) ? g.firstBatch[seatIndex] : null,
+    firstBatchHand: ['trump_select', 'half_court_offer'].includes(room.state) ? g.firstBatch[seatIndex] : null,
     halfCourtDeclarer: g.halfCourtDeclarer,
     halfCourtDeclarerTeam: g.halfCourtDeclarerTeam,
     halfCourtPassed: g.halfCourtPassed || [],
@@ -134,17 +133,14 @@ function startRound(room) {
   g.deck = cutDeck(shuffle(buildDeck()), cutParts);
   g.deckIndex = 0;
 
-  // Deal first 4 cards to ALL players counter-clockwise from dealer's right.
-  // Everyone sees their 4 cards for the Half Court offer.
-  // If the game proceeds to normal trump select, the second batch is dealt then.
+  // Original dealing: first 4 cards to trump chooser and dealer's mate only.
+  // Trump chooser's mate and dealer get their first 4 AFTER trump is declared.
   g.hands = [[], [], [], []];
   g.firstBatch = [null, null, null, null];
 
-  const dealOrder = [];
-  for (let i = 0; i < 4; i++) dealOrder.push((g.dealerSeat - 1 - i + 8) % 4);
-  for (const seat of dealOrder) {
-    g.firstBatch[seat] = dealToSeat(g, seat, 4);
-  }
+  const dealerMateSeat = (g.dealerSeat + 2) % 4;
+  g.firstBatch[g.trumpChooserSeat] = dealToSeat(g, g.trumpChooserSeat, 4);
+  g.firstBatch[dealerMateSeat] = dealToSeat(g, dealerMateSeat, 4);
 
   g.trumpSuit = null;
   g.currentTrick = [];
@@ -163,15 +159,15 @@ function startRound(room) {
   g.halfCourtDeclarer = null;
   g.halfCourtDeclarerTeam = null;
   g.halfCourtPassed = [];
-  g.phase = 'half_court_offer';
+  g.phase = 'trump_select';
 
-  room.state = 'half_court_offer';
+  room.state = 'trump_select';
   sendGameState(room);
 
   broadcast(room, {
     type: 'message',
     text: `New round! Dealer shuffled, ${room.players.find(p => p.seatIndex === cutterSeat)?.name || 'the left player'} cut (${cutParts} parts). ` +
-      `Each player has 4 cards — anyone can declare Half Court!`
+      `${room.players.find(p => p.seatIndex === g.trumpChooserSeat)?.name} chooses trumps.`
   });
 }
 
@@ -183,47 +179,31 @@ function handleAction(ws, data) {
 
   switch (data.action) {
     case 'choose_trump': {
-      if (room.state !== 'trump_select' && room.state !== 'half_court_select') return;
+      if (room.state !== 'trump_select') return;
       if (room.game.currentTurn !== player.seatIndex) return;
       const suit = data.suit;
       if (!['♠','♥','♦','♣'].includes(suit)) return;
 
       const g = room.game;
-      const isHalfCourt = room.state === 'half_court_select';
 
-      if (!isHalfCourt) {
-        // Normal game: finish dealing second batch to all players.
-        // (All players already have first 4 from startRound, so firstBatch checks are no-ops.)
-        const trumpChooserMateSeat = (g.trumpChooserSeat + 2) % 4;
-        if (!g.firstBatch[trumpChooserMateSeat]) {
-          g.firstBatch[trumpChooserMateSeat] = dealToSeat(g, trumpChooserMateSeat, 4);
-        }
-        if (!g.firstBatch[g.dealerSeat]) {
-          g.firstBatch[g.dealerSeat] = dealToSeat(g, g.dealerSeat, 4);
-        }
-        const order = [
-          (g.dealerSeat - 1 + 4) % 4,
-          (g.dealerSeat - 2 + 4) % 4,
-          (g.dealerSeat - 3 + 4) % 4,
-          g.dealerSeat,
-        ];
-        for (const seat of order) {
-          dealToSeat(g, seat, 4);
-        }
+      // Deal first 4 cards to trump chooser's mate and dealer (they didn't get them yet)
+      const trumpChooserMateSeat = (g.trumpChooserSeat + 2) % 4;
+      if (!g.firstBatch[trumpChooserMateSeat]) {
+        g.firstBatch[trumpChooserMateSeat] = dealToSeat(g, trumpChooserMateSeat, 4);
       }
-      // Half Court: no additional dealing — everyone plays with their 4 cards only.
+      if (!g.firstBatch[g.dealerSeat]) {
+        g.firstBatch[g.dealerSeat] = dealToSeat(g, g.dealerSeat, 4);
+      }
+      // Second batch is NOT dealt yet — happens only when all players pass on Half Court.
 
       g.trumpSuit = suit;
       g.trumpChooserTeam = player.seatIndex % 2 === 0 ? 0 : 1;
-      g.phase = 'playing';
-      g.currentTurn = isHalfCourt ? g.halfCourtDeclarer : g.trumpChooserSeat;
-      room.state = 'playing';
+      g.phase = 'half_court_offer';
+      room.state = 'half_court_offer';
 
       broadcast(room, {
         type: 'message',
-        text: isHalfCourt
-          ? `${player.name} chose ${SUIT_NAMES[suit]} ${suit} as trumps for Half Court! ${player.name} leads first.`
-          : `${player.name} chose ${SUIT_NAMES[suit]} ${suit} as trumps! ${player.name} leads first.`
+        text: `${player.name} chose ${SUIT_NAMES[suit]} ${suit} as trumps! Anyone can now declare Half Court.`
       });
       sendGameState(room);
       break;
@@ -330,12 +310,19 @@ function handleAction(ws, data) {
       broadcast(room, { type: 'message', text: `${player.name} passed on Half Court.` });
 
       if (g.halfCourtPassed.length === 4) {
-        // All passed — continue to normal trump select
-        g.phase = 'trump_select';
-        room.state = 'trump_select';
+        // All passed — deal second batch and start normal play
+        const order = [
+          (g.dealerSeat - 1 + 4) % 4,
+          (g.dealerSeat - 2 + 4) % 4,
+          (g.dealerSeat - 3 + 4) % 4,
+          g.dealerSeat,
+        ];
+        for (const seat of order) dealToSeat(g, seat, 4);
+        g.phase = 'playing';
+        room.state = 'playing';
         g.currentTurn = g.trumpChooserSeat;
         const chooserName = room.players.find(p => p.seatIndex === g.trumpChooserSeat)?.name || 'Trump chooser';
-        broadcast(room, { type: 'message', text: `All players passed. ${chooserName} chooses the trump suit.` });
+        broadcast(room, { type: 'message', text: `All passed on Half Court. ${chooserName} leads first.` });
       }
       sendGameState(room);
       break;
@@ -349,12 +336,13 @@ function handleAction(ws, data) {
       g.halfCourtDeclarerTeam = player.seatIndex % 2 === 0 ? 0 : 1;
       g.maxTricks = 4;
       g.currentTurn = player.seatIndex;
-      room.state = 'half_court_select';
-      g.phase = 'half_court_select';
+      // Trump is already chosen — go straight to playing with 4 cards each
+      room.state = 'playing';
+      g.phase = 'playing';
 
       broadcast(room, {
         type: 'message',
-        text: `${player.name} declared HALF COURT! They choose trumps and their team must win all 4 tricks!`
+        text: `${player.name} declared HALF COURT! Their team must win all 4 tricks or give 3 tokens to the opponent!`
       });
       sendGameState(room);
       break;

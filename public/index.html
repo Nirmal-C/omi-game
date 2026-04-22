@@ -656,7 +656,7 @@ body {
   <div class="overlay-box">
     <div style="font-size:44px;margin-bottom:6px;">🃏</div>
     <h2 style="color:var(--gold)">Half Court?</h2>
-    <p>These are your 4 cards. Declare <strong>Half Court</strong> to pick trumps<br>and challenge your team to win all 4 tricks.</p>
+    <p>These are your 4 cards. Trump is <strong id="hc-trump-display">?</strong><br>Declare <strong>Half Court</strong> and your team must win all 4 tricks.</p>
     <div class="hand-cards" id="half-court-cards" style="justify-content:center;margin:14px 0;"></div>
     <div id="half-court-buttons">
       <div style="display:flex;gap:12px;justify-content:center;">
@@ -963,19 +963,15 @@ function renderGame() {
   }
 
   // Overlays
-  if (g.needsTrumpSelect || g.needsHalfCourtTrumpSelect) {
+  if (g.needsTrumpSelect) {
     showTrumpOverlay(g);
   } else {
     document.getElementById('trump-overlay').classList.add('hidden');
   }
 
   // Half Court overlay
-  if (g.phase === 'half_court_offer' || g.phase === 'half_court_select') {
-    if (g.phase === 'half_court_offer') {
-      showHalfCourtOverlay(g);
-    } else {
-      document.getElementById('half-court-overlay').classList.add('hidden');
-    }
+  if (g.phase === 'half_court_offer') {
+    showHalfCourtOverlay(g);
   } else {
     document.getElementById('half-court-overlay').classList.add('hidden');
   }
@@ -1030,7 +1026,7 @@ function renderHand(g) {
   const labelEl = document.getElementById('hand-label');
   selectedCard = null;
 
-  if (g.phase === 'half_court_offer' || g.phase === 'half_court_select') {
+  if (g.phase === 'half_court_offer') {
     handEl.innerHTML = '';
     labelEl.textContent = 'YOUR FIRST 4 CARDS';
     return;
@@ -1063,23 +1059,12 @@ function renderInfoBar(g) {
 
   if (g.phase === 'half_court_offer') {
     const myPassed = g.halfCourtPassed && g.halfCourtPassed.includes(mySeat);
+    const ts = g.trumpSuit || '?';
     if (!myPassed) {
-      bar.innerHTML = 'Decide: declare <strong>Half Court</strong> or pass.';
+      bar.innerHTML = `Trump is <strong>${ts}</strong> — declare <strong>Half Court</strong> or pass?`;
       bar.className = 'info-bar your-turn';
     } else {
       bar.innerHTML = `You passed. Waiting for others... (${g.halfCourtPassed.length}/4 passed)`;
-      bar.className = 'info-bar';
-    }
-    return;
-  }
-
-  if (g.phase === 'half_court_select') {
-    if (g.halfCourtDeclarer === mySeat) {
-      bar.innerHTML = '<strong>Half Court!</strong> Choose your trump suit.';
-      bar.className = 'info-bar your-turn';
-    } else {
-      const declarer = g.players.find(p => p.seat === g.halfCourtDeclarer);
-      bar.innerHTML = `Waiting for <strong>${declarer?.name || '?'}</strong> to choose trumps (Half Court)...`;
       bar.className = 'info-bar';
     }
     return;
@@ -1169,6 +1154,14 @@ function showHalfCourtOverlay(g) {
   const overlay = document.getElementById('half-court-overlay');
   overlay.classList.remove('hidden');
 
+  // Show trump that was already chosen
+  const ts = g.trumpSuit || '?';
+  const trumpEl = document.getElementById('hc-trump-display');
+  if (trumpEl) {
+    trumpEl.textContent = ts;
+    trumpEl.style.color = (ts === '♥' || ts === '♦') ? 'var(--card-red)' : 'var(--text-bright)';
+  }
+
   const cards = g.firstBatchHand || g.hand.slice(0, 4);
   document.getElementById('half-court-cards').innerHTML = cards.map(card =>
     `<div class="card ${isRed(card.suit) ? 'red' : 'black'}" style="cursor:default">${makeCardInner(card)}</div>`
@@ -1211,12 +1204,6 @@ function chooseTrump(suit) {
 function showTrumpOverlay(g) {
   const overlay = document.getElementById('trump-overlay');
   overlay.classList.remove('hidden');
-
-  const isHalfCourt = g.phase === 'half_court_select';
-  overlay.querySelector('h2').textContent = isHalfCourt ? '🃏 Choose Trumps — Half Court' : 'Choose Trumps';
-  overlay.querySelector('p').textContent = isHalfCourt
-    ? 'You declared Half Court. Choose your trump suit — your team must win all 4 tricks!'
-    : 'You are the trump chooser. Look at your first 4 cards and pick a suit.';
 
   const first4 = g.firstBatchHand || g.hand.slice(0, 4);
   document.getElementById('first-batch-cards').innerHTML = first4.map(card =>
